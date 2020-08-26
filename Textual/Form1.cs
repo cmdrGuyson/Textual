@@ -7,6 +7,7 @@ using System.Drawing;
 using System.IO;
 using System.Linq;
 using System.Text;
+using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Forms;
@@ -19,13 +20,20 @@ namespace Textual
         private Mutex rtbMutex;
 
         //List of opened file paths
-        public static List<string> openedFilesList;
+        private static List<string> openedFilesList;
+
+        //Class to manage of words for spell check
+        private WordList wordList;
+
+        //Encryptor class
+        Encryptor encryptor = new Encryptor();
 
         public Form1()
         {
             InitializeComponent();
             rtbMutex = new Mutex();
             openedFilesList = new List<string> { };
+            wordList = new WordList();
         }
 
         //Method to create a new tab
@@ -34,6 +42,7 @@ namespace Textual
             TabPage tabPage = new TabPage();
             RichTextBox richTextBox = new RichTextBox();
             richTextBox.TextChanged += new EventHandler(richTextBox_TextChanged);
+            richTextBox.ForeColor = Color.Red;
             richTextBox.Dock = DockStyle.Fill;
             tabPage.Controls.Add(richTextBox);
             tabControl.Controls.Add(tabPage);
@@ -258,6 +267,7 @@ namespace Textual
                 tabControl.SelectedTab.Text = $"*{tabControl.SelectedTab.Text}";
             }
 
+            //spellCheck();
             calculateCounts();
         }
 
@@ -266,28 +276,21 @@ namespace Textual
         {
 
             //This is performed in a task
-            Task<Counts> task = new Task<Counts>(() =>
+            Task<Counts> task = new Task<Counts>((text) =>
             {
-                bool aLock = rtbMutex.WaitOne();
+                string rtb_text = (string)text;
 
-                try
-                {
-                    Counts counts = new Counts();
+                Counts counts = new Counts();
 
-                    //Ignore new lines, spaces, etc and calculate the word count, charachter count and line count
-                    char[] delimiters = new char[] { ' ', '\r', '\n' };
-                    counts.wordCount = getRichTextBox().Text.Split(delimiters, StringSplitOptions.RemoveEmptyEntries).Length;
-                    counts.charachterCount = getRichTextBox().Text.Length;
-                    counts.lineCount = getRichTextBox().Lines.Length;
+                //Ignore new lines, spaces, etc and calculate the word count, charachter count and line count
+                char[] delimiters = new char[] { ' ', '\r', '\n' };
+                counts.wordCount = rtb_text.Split(delimiters, StringSplitOptions.RemoveEmptyEntries).Length;
+                counts.charachterCount = rtb_text.Length;
+                counts.lineCount = rtb_text.Split('\n').Length;
 
-                    return counts;
-                }
-                finally
-                {
-                    if (aLock) rtbMutex.ReleaseMutex();
-                }
+                return counts;
 
-            });
+            }, getRichTextBox().Text);
 
             task.Start();
 
@@ -370,5 +373,55 @@ namespace Textual
         {
             saveAs();
         }
-    }
+
+        //When "Font Color" is clicked
+        private void toolStripButtonTextColor_Click(object sender, EventArgs e)
+        {
+            if (tabControl.SelectedTab != null)
+            {
+                if (colorDialog.ShowDialog() == DialogResult.OK)
+                {
+                    getRichTextBox().SelectionColor = colorDialog.Color;
+                }
+            }
+        }
+
+        private void spellCheck()
+        {
+            Task task = new Task(() =>
+            {
+
+                bool aLock = rtbMutex.WaitOne();
+
+                try
+                {
+                    foreach (string word in wordList.words)
+                    {
+                        string find = word;
+                        if (getRichTextBox().Text.Contains(find))
+                        {
+                            var matchString = Regex.Escape(find);
+                            foreach (Match match in Regex.Matches(getRichTextBox().Text, matchString))
+                            {
+                                getRichTextBox().Select(match.Index, find.Length);
+                                getRichTextBox().SelectionColor = Color.Black;
+                                getRichTextBox().Select(getRichTextBox().TextLength, 0);
+                                getRichTextBox().SelectionColor = getRichTextBox().ForeColor;
+                            };
+                        }
+                    }
+                }
+                finally
+                {
+                    if (aLock) rtbMutex.ReleaseMutex();
+                }
+
+            });
+
+            task.Start();
+            
+        }
 }
+}
+
+    
