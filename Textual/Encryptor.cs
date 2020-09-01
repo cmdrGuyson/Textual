@@ -9,17 +9,17 @@ namespace Textual
 {
     class Encryptor
     {
-        private string key = "dofkrfaosrdedofkrfaosrdedofkrfao";
-        private string IV = "zxcvbnmdfrasdfgh";
 
-        private string Encrypt(string text)
+        public static string Encrypt(string text, string key)
         {
+            Rfc2898DeriveBytes pdb = new Rfc2898DeriveBytes(key, new byte[] {0x49, 0x76, 0x61, 0x6e, 0x20, 0x4d, 0x65, 0x64, 0x76, 0x65, 0x64, 0x65, 0x76});
+            string IV = "zxcvbnmdfrasdfgh";
             byte[] input_text_bytes = ASCIIEncoding.ASCII.GetBytes(text);
             AesCryptoServiceProvider aes = new AesCryptoServiceProvider();
 
             aes.BlockSize = 128;
             aes.KeySize = 256;
-            aes.Key = ASCIIEncoding.ASCII.GetBytes(key);
+            aes.Key = pdb.GetBytes(32);
             aes.IV = ASCIIEncoding.ASCII.GetBytes(IV);
             aes.Padding = PaddingMode.PKCS7;
             aes.Mode = CipherMode.CBC;
@@ -31,16 +31,17 @@ namespace Textual
             return Convert.ToBase64String(encrypted);
         }
 
-        public string Decrypt(string encrypted)
-
+        public static string Decrypt(string encrypted, string key)
         {
-
+            Rfc2898DeriveBytes pdb = new Rfc2898DeriveBytes(key, new byte[] { 0x49, 0x76, 0x61, 0x6e, 0x20, 0x4d, 0x65, 0x64, 0x76, 0x65, 0x64, 0x65, 0x76 });
+            string IV = "zxcvbnmdfrasdfgh";
             byte[] encryptedbytes = Convert.FromBase64String(encrypted);
 
             AesCryptoServiceProvider aes = new AesCryptoServiceProvider();
 
-            aes.BlockSize = 128; aes.KeySize = 256;
-            aes.Key = ASCIIEncoding.ASCII.GetBytes(key);
+            aes.BlockSize = 128; 
+            aes.KeySize = 256;
+            aes.Key = pdb.GetBytes(32);
             aes.IV = ASCIIEncoding.ASCII.GetBytes(IV);
             aes.Padding = PaddingMode.PKCS7;
             aes.Mode = CipherMode.CBC;
