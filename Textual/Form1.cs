@@ -20,8 +20,8 @@ namespace Textual
         // Mutual exclusion for the richTextBox in given tab
         private Mutex rtbMutex;
 
-        //List of opened file paths
-        private static List<string> openedFilesList;
+        //Mutex for auto-save
+        private Mutex saveMutex;
 
         //Class to manage of words for spell check
         private WordList wordList;
@@ -30,8 +30,8 @@ namespace Textual
         {
             InitializeComponent();
             rtbMutex = new Mutex();
-            openedFilesList = new List<string> { };
             wordList = new WordList();
+            saveMutex = new Mutex();
         }
 
         //Method to create a new tab
@@ -51,7 +51,7 @@ namespace Textual
 
             //Title of the newly opened tab
             tabPage.Text = "untitled";
-
+            tabPage.Tag = "untitled";
             filename_toolStripLabel.Text = "untitled";
         }
 
@@ -62,10 +62,6 @@ namespace Textual
             {
                 if (!tabControl.SelectedTab.Text.StartsWith("*"))
                 {
-                    if (filename_toolStripLabel.Text.Contains("\\"))
-                    {
-                        openedFilesList.Remove(filename_toolStripLabel.Text);
-                    }
                     tabControl.TabPages.Remove(tabControl.SelectedTab);
                     resetCounts();
                 }
@@ -78,10 +74,6 @@ namespace Textual
                             save();
                             break;
                         case DialogResult.No:
-                            if (filename_toolStripLabel.Text.Contains("\\"))
-                            {
-                                openedFilesList.Remove(filename_toolStripLabel.Text);
-                            }
                             tabControl.TabPages.Remove(tabControl.SelectedTab);
                             resetCounts();
                             break;
@@ -149,15 +141,49 @@ namespace Textual
                         string filename = filename_toolStripLabel.Text;
                         if (File.Exists(filename))
                         {
-                            getRichTextBox().SaveFile(filename, RichTextBoxStreamType.RichText);
+                            string filepath = filename;
+                            string rtb_content = getRichTextBox().Rtf;
 
-                            /*
-                            File.WriteAllText(filename, "");
-                            StreamWriter strwriter = File.AppendText(filename);
-                            strwriter.Write(getRichTextBox().Text);
-                            strwriter.Close();
-                            strwriter.Dispose(); */
-                            selectedTab.Text = selectedTab.Text.Remove(0, 1);
+                            Task task = new Task(() =>
+                            {
+                                bool saveLock = saveMutex.WaitOne();
+
+                                try
+                                {
+                                    File.WriteAllText(filepath, "");
+                                    StreamWriter streamWriter = File.AppendText(filepath);
+                                    streamWriter.Write(rtb_content);
+                                    streamWriter.Close();
+                                    streamWriter.Dispose();
+
+                                    //Remove saved status (*)
+                                    if (selectedTab.Text.Contains("*"))
+                                    {
+                                        selectedTab.Text = selectedTab.Text.Remove(0, 1);
+                                    }
+                                }
+                                catch(Exception ex)
+                                {
+                                    throw ex;
+                                }
+                                finally
+                                {
+                                    if (saveLock) saveMutex.ReleaseMutex();
+                                }
+                            });
+
+                            //If there were any exceptions that occured during the task execution
+                            task.ContinueWith(t =>
+                            {
+                                task.Exception.Handle(ex =>
+                                {
+                                    MessageBox.Show(ex.Message, "Error", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                                    return false;
+                                });
+
+                            },CancellationToken.None, TaskContinuationOptions.OnlyOnFaulted, TaskScheduler.FromCurrentSynchronizationContext());
+
+                            task.Start();
                         }
                     }
                 }
@@ -179,26 +205,54 @@ namespace Textual
                 if (saveFileDialog.ShowDialog() == DialogResult.OK)
                 {
                     string filename = saveFileDialog.FileName;
-                    getRichTextBox().SaveFile(filename, RichTextBoxStreamType.RichText);
+                    string rtb_content = getRichTextBox().Rtf;
 
-                    /*File.WriteAllText(filename, "");
-                    StreamWriter strw = new StreamWriter(filename);
-                    strw.Write(getRichTextBox().Text);
-                    strw.Close();
-                    strw.Dispose();*/
-
-                    //Simplified filename
-                    string fname = filename.Substring(filename.LastIndexOf("\\") + 1);
-
-                    tabPage.Text = fname;
-                    filename_toolStripLabel.Text = filename;
-                    openedFilesList.Add(filename);
-
-                    //remove not saved status
-                    if (tabControl.SelectedTab.Text.StartsWith("*"))
+                    Task task = new Task(() =>
                     {
-                        tabPage.Text = tabPage.Text.Remove(0, 1);
-                    }
+                        bool saveLock = saveMutex.WaitOne();
+
+                        try
+                        {
+                            File.WriteAllText(filename, "");
+                            StreamWriter streamWriter = File.AppendText(filename);
+                            streamWriter.Write(rtb_content);
+                            streamWriter.Close();
+                            streamWriter.Dispose();
+
+                            //Remove saved status (*)
+                            if (tabPage.Text.Contains("*"))
+                            {
+                                tabPage.Text = tabPage.Text.Remove(0, 1);
+                            }
+
+                            //Simplified filename
+                            string fname = filename.Substring(filename.LastIndexOf("\\") + 1);
+
+                            tabPage.Text = fname;
+                            filename_toolStripLabel.Text = filename;
+                        }
+                        catch (Exception ex)
+                        {
+                            throw ex;
+                        }
+                        finally
+                        {
+                            if (saveLock) saveMutex.ReleaseMutex();
+                        }
+                    });
+
+                    //If there were any exceptions that occured during the task execution
+                    task.ContinueWith(t =>
+                    {
+                        task.Exception.Handle(ex =>
+                        {
+                            MessageBox.Show(ex.Message, "Error", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                            return false;
+                        });
+
+                    }, CancellationToken.None, TaskContinuationOptions.OnlyOnFaulted, TaskScheduler.FromCurrentSynchronizationContext());
+
+                    task.Start();
                 }
             }
         }
@@ -209,8 +263,6 @@ namespace Textual
             //If tabs are open
             if(tabControl.TabCount > 0)
             {
-                //Change the order of the opened files list
-                openedFilesList.Reverse();
 
                 //Get all the tabs open in the system
                 TabControl.TabPageCollection tabPageCollection = tabControl.TabPages;
@@ -230,28 +282,7 @@ namespace Textual
                         break;
                     }
 
-                    //Find the filepath (if it exists) of the tab using the openedFilesList
-                    foreach (string filename in openedFilesList)
-                    {
-                        string fname = filename.Substring(filename.LastIndexOf("\\") + 1);
-
-                        if (tab_text.Contains("*"))
-                        {
-                            string new_fname = tab.Text.Remove(0, 1);
-
-                            if (fname == new_fname)
-                            {
-                                filepath = filename;
-                            }
-                        }
-                        else
-                        {
-                            if (fname == tab.Text)
-                            {
-                               filepath = filename;
-                            }
-                        }
-                    }
+                    filepath = (string)tab.Tag;
 
                     //If tab is not an untitled tab and a filepath exists
                     if ((!tab_text.Equals("untitled") || !tab_text.Equals("*untitled")) && filepath!=null)
@@ -259,6 +290,7 @@ namespace Textual
                         //Start a new task to save the content of the tab's rich text box
                         Task task = new Task(() =>
                         {
+                            bool saveLock = saveMutex.WaitOne();
                             try
                             {
                                 File.WriteAllText(filepath, "");
@@ -277,6 +309,10 @@ namespace Textual
                             {
                                 //Throw any errors
                                 throw ex;
+                            }
+                            finally
+                            {
+                                if (saveLock) saveMutex.ReleaseMutex();
                             }
                         });
 
@@ -297,6 +333,52 @@ namespace Textual
                     }
 
                 }
+            }
+        }
+
+        //Auto-Save
+        private void autoSave()
+        {
+            string rtb_content = getRichTextBox().Rtf;
+            string filename = filename_toolStripLabel.Text;
+            TabPage selectedTab = tabControl.SelectedTab;
+
+            Task task = new Task((input) =>
+            {
+                string content = (string)input;
+                bool saveLock = saveMutex.WaitOne();
+
+                try
+                {
+                    File.WriteAllText(filename, "");
+                    StreamWriter strw = new StreamWriter(filename);
+                    strw.Write(content);
+                    strw.Close();
+                    strw.Dispose();
+                }
+                finally
+                {
+                    if (saveLock) saveMutex.ReleaseMutex();
+                }
+
+
+            }, rtb_content);
+
+            task.ContinueWith(t => {
+
+                //Remove saved status (*)
+                if (selectedTab.Text.Contains("*") && filename_toolStripLabel.Text.Contains("\\") && !selectedTab.Text.EndsWith(".texx"))
+                {
+                    selectedTab.Text = selectedTab.Text.Remove(0, 1);
+                }
+
+            }, TaskScheduler.FromCurrentSynchronizationContext());
+
+            if (filename_toolStripLabel.Text.Contains("\\") && !selectedTab.Text.EndsWith(".texx"))
+            {
+
+                task.Start();
+
             }
         }
 
@@ -324,16 +406,52 @@ namespace Textual
                             makeNewTab();
                         }
 
-                        getRichTextBox().LoadFile(openFileDialog.FileName, RichTextBoxStreamType.RichText);
-                        //getRichTextBox().Text = encryptor.Decrypt(getRichTextBox().Text);
+                        RichTextBox richTextBox = getRichTextBox();
                         TabPage tabPage = tabControl.SelectedTab;
 
-                        //Simplified filename
-                        string fname = filename.Substring(filename.LastIndexOf("\\") + 1);
+                        Task<string> task = new Task<string>(() =>
+                        {
+                            try
+                            {
+                                StreamReader strReader = new StreamReader(filename);
+                                string content = strReader.ReadToEnd();
+                                strReader.Close();
+                                return content;
 
-                        tabPage.Text = fname;
-                        openedFilesList.Add(filename);
-                        filename_toolStripLabel.Text = filename;
+                            }
+                            catch(Exception ex)
+                            {
+                                throw ex;
+                            }
+
+                        });
+
+                        task.ContinueWith(t =>
+                        {
+                            richTextBox.Rtf = t.Result;
+
+                            //Set the tab title and toolstrip label
+                            string fname = filename.Substring(filename.LastIndexOf("\\") + 1);
+                            tabPage.Tag = filename;
+                            tabPage.Text = fname;
+                            filename_toolStripLabel.Text = filename;
+
+                        }, TaskScheduler.FromCurrentSynchronizationContext());
+
+                        //Catch any errors and display (This occurs only when an error is thrown from the task)
+                        task.ContinueWith(t =>
+                        {
+
+                            task.Exception.Handle(ex =>
+                            {
+                                MessageBox.Show(ex.Message, "Error", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                                return false;
+                            });
+
+                        }, CancellationToken.None, TaskContinuationOptions.OnlyOnFaulted, TaskScheduler.FromCurrentSynchronizationContext());
+
+                        task.Start();
+
                     }
                 }
             }
@@ -345,13 +463,24 @@ namespace Textual
 
         public void decryptAndOpen(string password, string filename)
         {
-            try
+            Task<string> task = new Task<string>(() =>
             {
-                StreamReader streamReader = new StreamReader(filename);
-                string rtb_content = streamReader.ReadToEnd();
-                streamReader.Close();
+                try
+                {
+                    StreamReader streamReader = new StreamReader(filename);
+                    string rtb_content = streamReader.ReadToEnd();
+                    streamReader.Close();
+                    string decrypted = Encryptor.Decrypt(rtb_content, password);
+                    return decrypted;
+                }catch(Exception ex)
+                {
+                    throw ex;
+                }
+            });
 
-                string decrypted = Encryptor.Decrypt(rtb_content, password);
+            task.ContinueWith(t =>
+            {
+                string decrypted = t.Result;
 
                 if (decrypted.StartsWith("ENCRYPTED"))
                 {
@@ -364,30 +493,38 @@ namespace Textual
                     decrypted = decrypted.Substring(9);
 
                     getRichTextBox().Rtf = decrypted;
-                    //getRichTextBox().Text = encryptor.Decrypt(getRichTextBox().Text);
                     TabPage tabPage = tabControl.SelectedTab;
-
+                    tabPage.Tag = filename;
                     //Simplified filename
                     string fname = filename.Substring(filename.LastIndexOf("\\") + 1);
 
                     tabPage.Text = fname;
-                    openedFilesList.Add(filename);
                     filename_toolStripLabel.Text = filename;
                 }
-                else
-                {
-                    MessageBox.Show("Invalid Password!", "Error", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                }
 
-               
-            }catch (CryptographicException ex)
+            }, TaskScheduler.FromCurrentSynchronizationContext());
+
+            //Catch any errors and display (This occurs only when an error is thrown from the task)
+            task.ContinueWith(t =>
             {
-                MessageBox.Show("Invalid Password!", "Error", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-            }
-            catch (Exception ex)
-            {
-                MessageBox.Show(ex.Message, "Error", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-            }
+
+                task.Exception.Handle(ex =>
+                {
+                    if(ex is CryptographicException)
+                    {
+                        MessageBox.Show("Invalid Password!", "Error", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    }
+                    else
+                    {
+                        MessageBox.Show(ex.Message, "Error", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    }
+                    return false;
+                });
+
+            }, CancellationToken.None, TaskContinuationOptions.OnlyOnFaulted, TaskScheduler.FromCurrentSynchronizationContext());
+
+            task.Start();
+
         }
 
         //When "Print" button is clicked
@@ -523,30 +660,7 @@ namespace Textual
                 }
                 else
                 {
-                    foreach (string filename in openedFilesList)
-                    {
-                        if (tabPage != null)
-                        {
-                            string fname = filename.Substring(filename.LastIndexOf("\\") + 1);
-
-                            if (tabPage.Text.Contains("*"))
-                            {
-                                string new_fname = tabPage.Text.Remove(0, 1);
-
-                                if(fname == new_fname)
-                                {
-                                    filename_toolStripLabel.Text = filename;
-                                }
-                            }
-                            else
-                            {
-                                if(fname == tabPage.Text)
-                                {
-                                    filename_toolStripLabel.Text = filename;
-                                }
-                            }
-                        }
-                    }
+                    filename_toolStripLabel.Text = (string)tabPage.Tag;
                 }
             }
             else
@@ -630,7 +744,8 @@ namespace Textual
         {
             if(e.KeyChar == ' ')
             {
-                spellCheck();
+                //spellCheck();
+                //autoSave();
             }
         }
 
