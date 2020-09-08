@@ -15,6 +15,7 @@ namespace Textual
         public AboutForm()
         {
             InitializeComponent();
+            pictureBox1.SizeMode = PictureBoxSizeMode.StretchImage;
         }
     }
 }

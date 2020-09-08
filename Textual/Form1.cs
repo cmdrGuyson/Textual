@@ -20,11 +20,25 @@ namespace Textual
         // Mutual exclusion for the richTextBox in given tab
         private Mutex rtbMutex;
 
-        //Mutex for auto-save
+        //Mutex for saving rich text box content
         private Mutex saveMutex;
 
         //Class to manage of words for spell check
         private WordList wordList;
+
+        //Font sizes
+        private int[] fontSizes = { 11, 12, 14, 18, 21, 25 };
+
+        //Fonts
+        private List<FontFamily> fonts = System.Drawing.FontFamily.Families.ToList();
+
+        //Timer for auto save
+        private readonly System.Windows.Forms.Timer timer = new System.Windows.Forms.Timer();
+        //Tick counter for timer
+        private bool timerActive = false;
+
+        //State of real time spell check
+        private bool spellCheckEnabled = false;
 
         public Form1()
         {
@@ -32,6 +46,40 @@ namespace Textual
             rtbMutex = new Mutex();
             wordList = new WordList();
             saveMutex = new Mutex();
+            setComboBoxItems();
+
+            //Initialize time
+            timer.Interval = 120000;
+            //timer.Interval = 5000;
+            timer.Tick += timerMethod;
+        }
+
+        //Auto saving mechanism with timer (Every 2 minutes an auto save will be triggered)
+        private void timerMethod(object sender, EventArgs e)
+        {
+            if (timerActive)
+            {
+                timer.Stop();
+                saveAll();
+                timer.Start();
+            }
+        }
+
+        //Method to set items to combo box
+        private void setComboBoxItems()
+        {
+            foreach (int i in fontSizes)
+            {
+                toolStripComboBox_sizes.Items.Add(i);
+            }
+            
+            foreach (FontFamily i in fonts)
+            {
+                toolStripComboBox_fonts.Items.Add(i.Name);
+            }
+
+            toolStripComboBox_fonts.Enabled = false;
+            toolStripComboBox_sizes.Enabled = false;
         }
 
         //Method to create a new tab
@@ -53,6 +101,19 @@ namespace Textual
             tabPage.Text = "untitled";
             tabPage.Tag = "untitled";
             filename_toolStripLabel.Text = "untitled";
+
+            //Enable combo boxes
+            toolStripComboBox_fonts.Enabled = true;
+            toolStripComboBox_sizes.Enabled = true;
+
+            richTextBox.ContextMenuStrip = contextMenuStrip;
+
+            //Activate timer when first tab is open
+            if (!timerActive)
+            {
+                timer.Start();
+                timerActive = true;
+            }
         }
 
         //Method to close the current tab
@@ -156,11 +217,6 @@ namespace Textual
                                     streamWriter.Close();
                                     streamWriter.Dispose();
 
-                                    //Remove saved status (*)
-                                    if (selectedTab.Text.Contains("*"))
-                                    {
-                                        selectedTab.Text = selectedTab.Text.Remove(0, 1);
-                                    }
                                 }
                                 catch(Exception ex)
                                 {
@@ -171,6 +227,17 @@ namespace Textual
                                     if (saveLock) saveMutex.ReleaseMutex();
                                 }
                             });
+
+                            task.ContinueWith(t =>
+                            {
+
+                                //Remove saved status (*)
+                                if (selectedTab.Text.Contains("*"))
+                                {
+                                    selectedTab.Text = selectedTab.Text.Remove(0, 1);
+                                }
+
+                            }, TaskScheduler.FromCurrentSynchronizationContext());
 
                             //If there were any exceptions that occured during the task execution
                             task.ContinueWith(t =>
@@ -219,17 +286,6 @@ namespace Textual
                             streamWriter.Close();
                             streamWriter.Dispose();
 
-                            //Remove saved status (*)
-                            if (tabPage.Text.Contains("*"))
-                            {
-                                tabPage.Text = tabPage.Text.Remove(0, 1);
-                            }
-
-                            //Simplified filename
-                            string fname = filename.Substring(filename.LastIndexOf("\\") + 1);
-
-                            tabPage.Text = fname;
-                            filename_toolStripLabel.Text = filename;
                         }
                         catch (Exception ex)
                         {
@@ -240,6 +296,23 @@ namespace Textual
                             if (saveLock) saveMutex.ReleaseMutex();
                         }
                     });
+
+                    task.ContinueWith(t =>
+                    {
+
+                        //Remove saved status (*)
+                        if (tabPage.Text.Contains("*"))
+                        {
+                            tabPage.Text = tabPage.Text.Remove(0, 1);
+                        }
+
+                        //Simplified filename
+                        string fname = filename.Substring(filename.LastIndexOf("\\") + 1);
+
+                        tabPage.Text = fname;
+                        filename_toolStripLabel.Text = filename;
+
+                    }, TaskScheduler.FromCurrentSynchronizationContext());
 
                     //If there were any exceptions that occured during the task execution
                     task.ContinueWith(t =>
@@ -285,7 +358,7 @@ namespace Textual
                     filepath = (string)tab.Tag;
 
                     //If tab is not an untitled tab and a filepath exists
-                    if ((!tab_text.Equals("untitled") || !tab_text.Equals("*untitled")) && filepath!=null)
+                    if (filepath!="untitled")
                     {
                         //Start a new task to save the content of the tab's rich text box
                         Task task = new Task(() =>
@@ -298,12 +371,6 @@ namespace Textual
                                 streamWriter.Write(rtb_content);
                                 streamWriter.Close();
                                 streamWriter.Dispose();
-
-                                //Remove saved status (*)
-                                if (tab_text.Contains("*"))
-                                {
-                                    tab.Text = tab.Text.Remove(0, 1);
-                                }
                             }
                             catch (Exception ex)
                             {
@@ -315,6 +382,15 @@ namespace Textual
                                 if (saveLock) saveMutex.ReleaseMutex();
                             }
                         });
+
+                        task.ContinueWith(t =>
+                        {
+                            //Remove saved status (*)
+                            if (tab_text.Contains("*"))
+                            {
+                                tab.Text = tab.Text.Remove(0, 1);
+                            }
+                        }, TaskScheduler.FromCurrentSynchronizationContext());
 
                         //Start the task
                         task.Start();
@@ -336,58 +412,13 @@ namespace Textual
             }
         }
 
-        //Auto-Save
-        private void autoSave()
-        {
-            string rtb_content = getRichTextBox().Rtf;
-            string filename = filename_toolStripLabel.Text;
-            TabPage selectedTab = tabControl.SelectedTab;
-
-            Task task = new Task((input) =>
-            {
-                string content = (string)input;
-                bool saveLock = saveMutex.WaitOne();
-
-                try
-                {
-                    File.WriteAllText(filename, "");
-                    StreamWriter strw = new StreamWriter(filename);
-                    strw.Write(content);
-                    strw.Close();
-                    strw.Dispose();
-                }
-                finally
-                {
-                    if (saveLock) saveMutex.ReleaseMutex();
-                }
-
-
-            }, rtb_content);
-
-            task.ContinueWith(t => {
-
-                //Remove saved status (*)
-                if (selectedTab.Text.Contains("*") && filename_toolStripLabel.Text.Contains("\\") && !selectedTab.Text.EndsWith(".texx"))
-                {
-                    selectedTab.Text = selectedTab.Text.Remove(0, 1);
-                }
-
-            }, TaskScheduler.FromCurrentSynchronizationContext());
-
-            if (filename_toolStripLabel.Text.Contains("\\") && !selectedTab.Text.EndsWith(".texx"))
-            {
-
-                task.Start();
-
-            }
-        }
 
         //When "Open" is clicked
         private void openToolStripMenuItem_Click(object sender, EventArgs e)
         {
             try
             {
-                //openFileDialog.Filter = "Rich Text Format|*.rtf";
+                openFileDialog.Filter = "Textual Files|*.rtf;*texx";
                 if (openFileDialog.ShowDialog() == DialogResult.OK)
                 {
                     string filename = openFileDialog.FileName;
@@ -501,6 +532,10 @@ namespace Textual
                     tabPage.Text = fname;
                     filename_toolStripLabel.Text = filename;
                 }
+                else
+                {
+                    throw new CryptographicException();
+                }
 
             }, TaskScheduler.FromCurrentSynchronizationContext());
 
@@ -586,7 +621,6 @@ namespace Textual
                     getRichTextBox().SelectionFont = fontDialog.Font;
                 }
             }
-
         }
 
         //When text is changed in the tabs rich text box update the word count, charachter count and line count
@@ -654,6 +688,7 @@ namespace Textual
             //If at least 1 tab is open
             if(tabControl.TabCount > 0)
             {
+
                 if (tabPage.Text.Equals("untitled") || tabPage.Text.Equals("*untitled"))
                 {
                     filename_toolStripLabel.Text = tabPage.Text;
@@ -666,6 +701,14 @@ namespace Textual
             else
             {
                 filename_toolStripLabel.Text = "No files open";
+
+                //Disbale combo boxes
+                toolStripComboBox_fonts.Enabled = false;
+                toolStripComboBox_sizes.Enabled = false;
+
+                //Deactivate Timer
+                timer.Stop();
+                timerActive = false;
             }
         }
 
@@ -704,29 +747,19 @@ namespace Textual
 
         private void spellCheck()
         {
-            Task task = new Task(() =>
+            string text = getRichTextBox().Text;
+
+            Task<string[]> task = new Task<string[]>(() =>
             {
                 bool aLock = rtbMutex.WaitOne();
 
                 try
                 {
                     char[] delimiters = new char[] { ' ', '\r', '\n' };
-                    string[] words = getRichTextBox().Text.Split(delimiters, StringSplitOptions.RemoveEmptyEntries);
+                    string[] words = text.Split(delimiters, StringSplitOptions.RemoveEmptyEntries);
 
-                    foreach (string word in words)
-                    {
-                        if (!wordList.words.Contains(word) || !wordList.words.Contains(word.Remove('.')))
-                        {
-                            var matchString = Regex.Escape(word);
-                            foreach (Match match in Regex.Matches(getRichTextBox().Text, matchString))
-                            {
-                                getRichTextBox().Select(match.Index, word.Length);
-                                getRichTextBox().SelectionColor = Color.Red;
-                                getRichTextBox().Select(getRichTextBox().TextLength, 0);
-                                getRichTextBox().SelectionColor = getRichTextBox().ForeColor;
-                            };
-                        }
-                    }
+
+                    return words;
                 }
                 finally
                 {
@@ -735,7 +768,47 @@ namespace Textual
 
             });
 
-            task.Start();
+            task.ContinueWith(t =>
+            {
+                string[] words = t.Result;
+
+                foreach (string a_word in words)
+                {
+                    string word = a_word.ToLower();
+
+                    //word = (word.Contains('.')) ? word.Remove('.') : word;
+
+                    var matchString = Regex.Escape(word);
+
+                    if (!wordList.words.Contains(word))
+                    {
+                        foreach (Match match in Regex.Matches(getRichTextBox().Text, matchString))
+                        {
+                            getRichTextBox().Select(match.Index, word.Length);
+                            getRichTextBox().SelectionColor = Color.Red;
+                            getRichTextBox().Select(getRichTextBox().TextLength, 0);
+                            getRichTextBox().SelectionColor = getRichTextBox().ForeColor;
+                        };
+                    }
+                    else
+                    {
+                        foreach (Match match in Regex.Matches(getRichTextBox().Text, matchString))
+                        {
+                            getRichTextBox().Select(match.Index, word.Length);
+                            getRichTextBox().SelectionColor = Color.Black;
+                            getRichTextBox().Select(getRichTextBox().TextLength, 0);
+                            getRichTextBox().SelectionColor = getRichTextBox().ForeColor;
+                        };
+                    }
+                }
+
+            }, TaskScheduler.FromCurrentSynchronizationContext());
+
+
+            if (spellCheckEnabled)
+            {
+                task.Start();
+            }
             
         }
 
@@ -744,8 +817,7 @@ namespace Textual
         {
             if(e.KeyChar == ' ')
             {
-                //spellCheck();
-                //autoSave();
+                spellCheck();
             }
         }
 
@@ -787,7 +859,7 @@ namespace Textual
 
         private void selectAllToolStripMenuItem_Click(object sender, EventArgs e)
         {
-            getRichTextBox().SelectAll();
+            if (tabControl.SelectedTab != null) getRichTextBox().SelectAll();
         }
 
         //When "Print Preview" is clicked
@@ -799,8 +871,282 @@ namespace Textual
                 printPreviewDialog.ShowDialog();
             }
         }
-    }
 
+        //When "About" button is clicked
+        private void aboutToolStripMenuItem_Click(object sender, EventArgs e)
+        {
+            AboutForm about = new AboutForm();
+            about.Show();
+        }
+
+        //When "Bold" button is clicked
+        private void toolStripButton_bold_Click(object sender, EventArgs e)
+        {
+            try
+            {
+                if (tabControl.SelectedTab != null)
+                {
+                    RichTextBox rtbCaseContent = getRichTextBox();
+
+                    if (rtbCaseContent.SelectedText.Length > 0)
+                    {
+                        FontStyle style = FontStyle.Bold;
+                        Font selectedFont;
+
+                        //If multiple fonts are selected
+                        if (rtbCaseContent.SelectionFont == null)
+                        {
+                            selectedFont = new Font(new Font(FontFamily.GenericSansSerif, 12), style);
+                        }
+                        else
+                        {
+                            selectedFont = rtbCaseContent.SelectionFont;
+
+                            //If already bold convert to regular
+                            if (rtbCaseContent.SelectionFont.Bold == true)
+                            {
+                                style = FontStyle.Regular;
+                            }
+                            //If previously italic, keep italic property
+                            if (rtbCaseContent.SelectionFont.Italic == true)
+                            {
+                                style |= FontStyle.Italic;
+                            }
+                            //If previously underlined, keep underline property
+                            if (rtbCaseContent.SelectionFont.Underline == true)
+                            {
+                                style |= FontStyle.Underline;
+                            }
+                        }
+
+                        rtbCaseContent.SelectionFont = new Font(selectedFont, style);
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(ex.Message, "Error", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            }
+        }
+
+        //When "Italic" button is clicked
+        private void toolStripButton_italic_Click(object sender, EventArgs e)
+        {
+            try
+            {
+                if (tabControl.SelectedTab != null)
+                {
+                    RichTextBox rtbCaseContent = getRichTextBox();
+
+                    if (rtbCaseContent.SelectedText.Length > 0)
+                    {
+                        FontStyle style = FontStyle.Italic;
+                        Font selectedFont;
+
+                        //If multiple fonts are selected
+                        if (rtbCaseContent.SelectionFont == null)
+                        {
+                            selectedFont = new Font(new Font(FontFamily.GenericSansSerif, 12), style);
+                        }
+                        else
+                        {
+                            selectedFont = rtbCaseContent.SelectionFont;
+
+                            //If already italic convert to regular
+                            if (rtbCaseContent.SelectionFont.Italic == true)
+                            {
+                                style = FontStyle.Regular;
+                            }
+                            //If previously underlined, keep underline property
+                            if (rtbCaseContent.SelectionFont.Underline == true)
+                            {
+                                style |= FontStyle.Underline;
+                            }
+                            //If previously bold, keep bold property
+                            if (rtbCaseContent.SelectionFont.Bold == true)
+                            {
+                                style |= FontStyle.Bold;
+                            }
+                        }
+
+                        rtbCaseContent.SelectionFont = new Font(selectedFont, style);
+                    }
+                }
+            }
+            catch(Exception ex)
+            {
+                MessageBox.Show(ex.Message, "Error", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            }
+        }
+
+        //When "Underline" button is clicked
+        private void toolStripButton_underline_Click(object sender, EventArgs e)
+        {
+            try
+            {
+                if (tabControl.SelectedTab != null)
+                {
+                    RichTextBox rtbCaseContent = getRichTextBox();
+
+                    if (rtbCaseContent.SelectedText.Length > 0)
+                    {
+                        FontStyle style = FontStyle.Underline;
+                        Font selectedFont; 
+
+                        //If multiple fonts are selected
+                        if(rtbCaseContent.SelectionFont == null)
+                        {
+                            selectedFont = new Font(new Font(FontFamily.GenericSansSerif, 12), style);
+                        }
+                        else
+                        {
+                            selectedFont = rtbCaseContent.SelectionFont;
+
+                            //If selected text has been underlined, remove property
+                            if (rtbCaseContent.SelectionFont.Underline == true)
+                            {
+                                style = FontStyle.Regular;
+                            }
+                            //If already italic keep property
+                            if (rtbCaseContent.SelectionFont.Italic == true)
+                            {
+                                style |= FontStyle.Italic;
+                            }
+                            //If already bold keep property
+                            if (rtbCaseContent.SelectionFont.Bold == true)
+                            {
+                                style |= FontStyle.Bold;
+                            }
+                        }
+
+                        rtbCaseContent.SelectionFont = new Font(selectedFont, style);
+                    }
+                }
+            }
+            catch(Exception ex)
+            {
+                MessageBox.Show(ex.Message, "Error", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            }
+        }
+
+        //When font size is changed by the combo box
+        private void toolStripComboBox_sizes_SelectedIndexChanged(object sender, EventArgs e)
+        {
+            try
+            {
+                if (tabControl.SelectedTab != null)
+                {
+                    int index = toolStripComboBox_sizes.SelectedIndex;
+
+                    //If multiple fonts are selected
+                    FontFamily font = (getRichTextBox().SelectionFont == null) ? FontFamily.GenericSansSerif : getRichTextBox().SelectionFont.FontFamily;
+
+                    if (index != -1) getRichTextBox().SelectionFont = new Font(font, fontSizes[index]);
+                }
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(ex.Message, "Error", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            }
+        }
+
+        //When the font is changed by the combo box
+        private void toolStripComboBox_fonts_SelectedIndexChanged(object sender, EventArgs e)
+        {
+            try
+            {
+
+                if (tabControl.SelectedTab != null)
+                {
+                    int index = toolStripComboBox_fonts.SelectedIndex;
+
+                    //If multiple sizes are selected
+                    float size = (getRichTextBox().SelectionFont == null) ? 12 : getRichTextBox().SelectionFont.Size;
+
+                    if (index != -1) getRichTextBox().SelectionFont = new Font(fonts[index], size);
+                }
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(ex.Message, "Error", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            }
+        }
+
+        //Method to add an image
+        private void addImage()
+        {
+            if (tabControl.SelectedTab != null)
+            {
+                try
+                {
+                    openFileDialog.Filter = "Images |*.bmp;*.jpg;*.png;*.gif;*.ico";
+                    openFileDialog.Multiselect = false;
+                    openFileDialog.FileName = "";
+                    DialogResult result = openFileDialog.ShowDialog();
+                    if (result == DialogResult.OK)
+                    {
+                        Image img = Image.FromFile(openFileDialog.FileName);
+                        Clipboard.SetImage(img);
+                        getRichTextBox().Paste();
+                        getRichTextBox().Focus();
+                    }
+                    else
+                    {
+                        getRichTextBox().Focus();
+                    }
+                }catch(Exception ex)
+                {
+                    MessageBox.Show(ex.Message, "Error", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                }
+                
+            }
+        }
+
+        //When "Add Image" button is clicked
+        private void toolStripButton2_Click(object sender, EventArgs e)
+        {
+            addImage();
+        }
+
+        private void enableAutoSaveToolStripMenuItem_Click(object sender, EventArgs e)
+        {
+            if (spellCheckEnabled)
+            {
+                spellCheckEnabled = false;
+                enableAutoSaveToolStripMenuItem.Text = "Disable &Spell Check";
+            }
+            else
+            {
+
+                DialogResult result = MessageBox.Show("Please note that real time spell check will be buggy for large files. (Rich text boxes with a lot of content.)", "Enable Real Time Spell Check", MessageBoxButtons.OKCancel, MessageBoxIcon.Warning);
+                switch (result)
+                {
+                    case DialogResult.OK:
+                        spellCheckEnabled = true;
+                        enableAutoSaveToolStripMenuItem.Text = "Disable &Spell Check";
+                        break;
+                    case DialogResult.Cancel:
+                        break;
+                }
+            }
+        }
+
+        private void Form1_FormClosing(object sender, FormClosingEventArgs e)
+        {
+            if (tabControl.TabCount > 0)
+            {
+                //Get all the tabs open in the system
+                TabControl.TabPageCollection tabPageCollection = tabControl.TabPages;
+
+                //Loop through all tab pages
+                foreach (TabPage tab in tabPageCollection)
+                {
+                    tabControl.SelectedTab = tab;
+                    closeCurrentTab();
+                }
+            }
+        }
+    }
 }
 
     
