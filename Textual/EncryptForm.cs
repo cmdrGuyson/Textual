@@ -1,11 +1,5 @@
 ﻿using System;
-using System.Collections.Generic;
-using System.ComponentModel;
-using System.Data;
-using System.Drawing;
 using System.IO;
-using System.Linq;
-using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Forms;
@@ -15,9 +9,9 @@ namespace Textual
     public partial class EncryptForm : Form
     {
         private string rtb_content;
-        private Form1 parent;
+        private MainForm parent;
 
-        public EncryptForm(string rtb_content, Form1 parent)
+        public EncryptForm(string rtb_content, MainForm parent)
         {
             InitializeComponent();
             this.rtb_content = rtb_content;
@@ -32,6 +26,7 @@ namespace Textual
 
         private void textBox2_KeyPress(object sender, KeyPressEventArgs e)
         {
+            //If enter is pressed
             if (e.KeyChar == Convert.ToChar(Keys.Return))
             {
                 encryptClicked();
@@ -43,10 +38,12 @@ namespace Textual
             string password = textBox1.Text;
             string confirmPassword = textBox2.Text;
 
+            //If fields are empty
             if (password.Equals("") || confirmPassword.Equals(""))
             {
                 MessageBox.Show("Dont't leave it blank!", "Error", MessageBoxButtons.OK, MessageBoxIcon.Warning);
             }
+            //If password is not equal to confirm password
             else if (password != confirmPassword)
             {
                 MessageBox.Show("Passwords don't match", "Error", MessageBoxButtons.OK, MessageBoxIcon.Warning);
@@ -57,18 +54,23 @@ namespace Textual
                 saveFileDialog.Filter = "Textual Encrypted|*.texx";
                 if (saveFileDialog.ShowDialog() == DialogResult.OK)
                 {
-                    Task task = new Task(() =>
+                    //Task to encrypt and save file
+                    Task<string> task = new Task<string>(() =>
                     {
                         try
                         {
                             string filename = saveFileDialog.FileName;
+                            //Add "ENCRYPTED" to the start of content to be encrypted
                             rtb_content = "ENCRYPTED" + rtb_content;
+                            //Encrypt content and save
                             string encrypted_content = Encryptor.Encrypt(rtb_content, password);
                             File.WriteAllText(filename, "");
                             StreamWriter strw = new StreamWriter(filename);
                             strw.Write(encrypted_content);
                             strw.Close();
                             strw.Dispose();
+
+                            return filename;
 
                         }
                         catch (Exception ex)
@@ -78,13 +80,17 @@ namespace Textual
 
                     });
 
+                    //When task is over call changeSavedState method on parent form to remove * from tab title
                     task.ContinueWith(t =>
                     {
                         parent.Enabled = true;
                         parent.changeSavedState();
+                        parent.changeTitleLabel(t.Result);
                         this.Dispose();
+
                     }, TaskScheduler.FromCurrentSynchronizationContext());
 
+                    //Handle any exceptions that occured in the task
                     task.ContinueWith(t =>
                     {
                         task.Exception.Handle(ex =>

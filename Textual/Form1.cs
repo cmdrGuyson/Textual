@@ -1,13 +1,9 @@
 ﻿using System;
-using System.Collections;
 using System.Collections.Generic;
-using System.ComponentModel;
-using System.Data;
 using System.Drawing;
 using System.IO;
 using System.Linq;
 using System.Security.Cryptography;
-using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
@@ -15,7 +11,7 @@ using System.Windows.Forms;
 
 namespace Textual
 {
-    public partial class Form1 : Form
+    public partial class MainForm : Form
     {
         // Mutual exclusion for the richTextBox in given tab
         private Mutex rtbMutex;
@@ -40,7 +36,7 @@ namespace Textual
         //State of real time spell check
         private bool spellCheckEnabled = false;
 
-        public Form1()
+        public MainForm()
         {
             InitializeComponent();
             rtbMutex = new Mutex();
@@ -50,7 +46,6 @@ namespace Textual
 
             //Initialize time
             timer.Interval = 120000;
-            //timer.Interval = 5000;
             timer.Tick += timerMethod;
         }
 
@@ -68,16 +63,19 @@ namespace Textual
         //Method to set items to combo box
         private void setComboBoxItems()
         {
+            //Add font sizes to font size combo box
             foreach (int i in fontSizes)
             {
                 toolStripComboBox_sizes.Items.Add(i);
             }
             
+            //Add all fonts in FontFamily class to font combo box
             foreach (FontFamily i in fonts)
             {
                 toolStripComboBox_fonts.Items.Add(i.Name);
             }
 
+            //Enable combo boxes for fonts and font sizes
             toolStripComboBox_fonts.Enabled = false;
             toolStripComboBox_sizes.Enabled = false;
         }
@@ -85,35 +83,50 @@ namespace Textual
         //Method to create a new tab
         private void makeNewTab()
         {
-            TabPage tabPage = new TabPage();
-            RichTextBox richTextBox = new RichTextBox();
-            richTextBox.TextChanged += new EventHandler(richTextBox_TextChanged);
-            richTextBox.KeyPress += new KeyPressEventHandler(richTextBox_KeyPress);
-            richTextBox.ForeColor = Color.Black;
-            richTextBox.Dock = DockStyle.Fill;
-            tabPage.Controls.Add(richTextBox);
-            tabControl.Controls.Add(tabPage);
-            resetCounts();
-
-            tabControl.SelectedTab = tabPage;
-
-            //Title of the newly opened tab
-            tabPage.Text = "untitled";
-            tabPage.Tag = "untitled";
-            filename_toolStripLabel.Text = "untitled";
-
-            //Enable combo boxes
-            toolStripComboBox_fonts.Enabled = true;
-            toolStripComboBox_sizes.Enabled = true;
-
-            richTextBox.ContextMenuStrip = contextMenuStrip;
-
-            //Activate timer when first tab is open
-            if (!timerActive)
+            try
             {
-                timer.Start();
-                timerActive = true;
+                //Create new TabPage and RichTextBox objects    
+                TabPage tabPage = new TabPage();
+                RichTextBox richTextBox = new RichTextBox();
+                //Assign event handlers to RichTextBox
+                richTextBox.TextChanged += new EventHandler(richTextBox_TextChanged);
+                richTextBox.KeyPress += new KeyPressEventHandler(richTextBox_KeyPress);
+
+                richTextBox.ForeColor = Color.Black;
+                richTextBox.Dock = DockStyle.Fill;
+
+                //Add the rich text box to the created tab
+                tabPage.Controls.Add(richTextBox);
+
+                //Add the tab to the window
+                tabControl.Controls.Add(tabPage);
+                resetCounts();
+
+                tabControl.SelectedTab = tabPage;
+
+                //Title of the newly opened tab
+                tabPage.Text = "untitled";
+                tabPage.Tag = "untitled";
+                filename_toolStripLabel.Text = "untitled";
+
+                //Enable combo boxes
+                toolStripComboBox_fonts.Enabled = true;
+                toolStripComboBox_sizes.Enabled = true;
+
+                richTextBox.ContextMenuStrip = contextMenuStrip;
+
+                //Activate timer when first tab is open
+                if (!timerActive)
+                {
+                    timer.Start();
+                    timerActive = true;
+                }
             }
+            catch(Exception ex)
+            {
+                MessageBox.Show(ex.Message, "Error", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            }
+            
         }
 
         //Method to close the current tab
@@ -121,6 +134,7 @@ namespace Textual
         {
             if (tabControl.SelectedTab != null) 
             {
+                //If tab doesn't have unsaved changes
                 if (!tabControl.SelectedTab.Text.StartsWith("*"))
                 {
                     tabControl.TabPages.Remove(tabControl.SelectedTab);
@@ -128,23 +142,25 @@ namespace Textual
                 }
                 else
                 {
+                    //Display a message to the user alerting that there are unsaved changes
                     DialogResult result = MessageBox.Show("You haven't saved your changes!", "Unsaved Changes", MessageBoxButtons.YesNoCancel, MessageBoxIcon.Warning);
                     switch (result) {
 
+                        //User clicks "Yes"
                         case DialogResult.Yes:
                             save();
                             break;
+                        //User clicks "No"
                         case DialogResult.No:
                             tabControl.TabPages.Remove(tabControl.SelectedTab);
                             resetCounts();
                             break;
+                        //User clicks "Cancel"
                         default:
                             break;
                     }
                 }
             }
-            
-            
         }
 
         //Method to get the RichTextBox of the current tab
@@ -173,90 +189,99 @@ namespace Textual
             save();
         }
 
-        /*SAVE*/
+        /* Method to save the contents of a tab */
         private void save()
         {
+            //Get the seelcted tab
             TabPage selectedTab = tabControl.SelectedTab;
 
-            if (selectedTab.Text.EndsWith(".texx"))
+            if (selectedTab != null)
             {
-                DialogResult result = MessageBox.Show("Please re-encrypt and save!", "Unsaved Changes", MessageBoxButtons.OKCancel, MessageBoxIcon.Warning);
-                switch (result)
+                //If opened document is an ecrypted document make the user re-encrypt and save
+                if (selectedTab.Text.EndsWith(".texx"))
                 {
-
-                    case DialogResult.OK:
-                        encryptAndSave();
-                        break;
-                    case DialogResult.Cancel:
-                        break;
-                }
-            }
-            else
-            {
-                //If save as has already been done
-                if (filename_toolStripLabel.Text.Contains("\\"))
-                {
-                    //If file has unsaved changes
-                    if (selectedTab.Text.Contains("*"))
+                    DialogResult result = MessageBox.Show("Please re-encrypt and save!", "Unsaved Changes", MessageBoxButtons.OKCancel, MessageBoxIcon.Warning);
+                    switch (result)
                     {
-                        string filename = filename_toolStripLabel.Text;
-                        if (File.Exists(filename))
-                        {
-                            string filepath = filename;
-                            string rtb_content = getRichTextBox().Rtf;
 
-                            Task task = new Task(() =>
-                            {
-                                bool saveLock = saveMutex.WaitOne();
-
-                                try
-                                {
-                                    File.WriteAllText(filepath, "");
-                                    StreamWriter streamWriter = File.AppendText(filepath);
-                                    streamWriter.Write(rtb_content);
-                                    streamWriter.Close();
-                                    streamWriter.Dispose();
-
-                                }
-                                catch(Exception ex)
-                                {
-                                    throw ex;
-                                }
-                                finally
-                                {
-                                    if (saveLock) saveMutex.ReleaseMutex();
-                                }
-                            });
-
-                            task.ContinueWith(t =>
-                            {
-
-                                //Remove saved status (*)
-                                if (selectedTab.Text.Contains("*"))
-                                {
-                                    selectedTab.Text = selectedTab.Text.Remove(0, 1);
-                                }
-
-                            }, TaskScheduler.FromCurrentSynchronizationContext());
-
-                            //If there were any exceptions that occured during the task execution
-                            task.ContinueWith(t =>
-                            {
-                                task.Exception.Handle(ex =>
-                                {
-                                    MessageBox.Show(ex.Message, "Error", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                                    return false;
-                                });
-
-                            },CancellationToken.None, TaskContinuationOptions.OnlyOnFaulted, TaskScheduler.FromCurrentSynchronizationContext());
-
-                            task.Start();
-                        }
+                        case DialogResult.OK:
+                            encryptAndSave();
+                            break;
+                        case DialogResult.Cancel:
+                            break;
                     }
                 }
                 else
                 {
-                    saveAs();
+                    //If save as has already been done
+                    if (filename_toolStripLabel.Text.Contains("\\"))
+                    {
+                        //If file has unsaved changes
+                        if (selectedTab.Text.Contains("*"))
+                        {
+                            string filename = filename_toolStripLabel.Text;
+                            if (File.Exists(filename))
+                            {
+                                string filepath = filename;
+                                string rtb_content = getRichTextBox().Rtf;
+
+                                //Create a new task to save the rich text box content
+                                Task task = new Task(() =>
+                                {
+                                    //Aquire the mutex
+                                    bool saveLock = saveMutex.WaitOne();
+
+                                    try
+                                    {
+                                        //Save file
+                                        File.WriteAllText(filepath, "");
+                                        StreamWriter streamWriter = File.AppendText(filepath);
+                                        streamWriter.Write(rtb_content);
+                                        streamWriter.Close();
+                                        streamWriter.Dispose();
+
+                                    }
+                                    catch (Exception ex)
+                                    {
+                                        throw ex;
+                                    }
+                                    finally
+                                    {
+                                        //Release mutex
+                                        if (saveLock) saveMutex.ReleaseMutex();
+                                    }
+                                });
+
+                                task.ContinueWith(t =>
+                                {
+
+                                    //Remove saved status (*)
+                                    if (selectedTab.Text.Contains("*"))
+                                    {
+                                        selectedTab.Text = selectedTab.Text.Remove(0, 1);
+                                    }
+
+                                }, TaskScheduler.FromCurrentSynchronizationContext());
+
+                                //If there were any exceptions that occured during the task execution
+                                task.ContinueWith(t =>
+                                {
+                                    task.Exception.Handle(ex =>
+                                    {
+                                        MessageBox.Show(ex.Message, "Error", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                                        return false;
+                                    });
+
+                                }, CancellationToken.None, TaskContinuationOptions.OnlyOnFaulted, TaskScheduler.FromCurrentSynchronizationContext());
+
+                                task.Start();
+                            }
+                        }
+                    }
+                    else
+                    {
+                        saveAs();
+                    }
                 }
             }
         }
@@ -268,12 +293,15 @@ namespace Textual
             {
                 TabPage tabPage = tabControl.SelectedTab;
 
+                //Only allow user to save document as .rtf
                 saveFileDialog.Filter = "Rich Text Format|*.rtf";
                 if (saveFileDialog.ShowDialog() == DialogResult.OK)
                 {
+                    //Get filename and content to be saved
                     string filename = saveFileDialog.FileName;
                     string rtb_content = getRichTextBox().Rtf;
 
+                    //Create a new task to carry out saving
                     Task task = new Task(() =>
                     {
                         bool saveLock = saveMutex.WaitOne();
@@ -297,6 +325,7 @@ namespace Textual
                         }
                     });
 
+                    //When task is done executing
                     task.ContinueWith(t =>
                     {
 
@@ -309,7 +338,13 @@ namespace Textual
                         //Simplified filename
                         string fname = filename.Substring(filename.LastIndexOf("\\") + 1);
 
+                        //Set tab title
                         tabPage.Text = fname;
+
+                        //Set filepath as tag
+                        tabPage.Tag = filename;
+
+                        //Set the filepath as the tool strip label
                         filename_toolStripLabel.Text = filename;
 
                     }, TaskScheduler.FromCurrentSynchronizationContext());
@@ -350,64 +385,61 @@ namespace Textual
 
                     string filepath = null;
 
-                    if (tab_text.EndsWith(".texx"))
+                    if (!tab_text.EndsWith(".texx"))
                     {
-                        break;
-                    }
+                        filepath = (string)tab.Tag;
 
-                    filepath = (string)tab.Tag;
-
-                    //If tab is not an untitled tab and a filepath exists
-                    if (filepath!="untitled")
-                    {
-                        //Start a new task to save the content of the tab's rich text box
-                        Task task = new Task(() =>
+                        //If tab is not an untitled tab and a filepath exists
+                        if (filepath != "untitled")
                         {
-                            bool saveLock = saveMutex.WaitOne();
-                            try
+                            //Start a new task to save the content of the tab's rich text box
+                            Task task = new Task(() =>
                             {
-                                File.WriteAllText(filepath, "");
-                                StreamWriter streamWriter = File.AppendText(filepath);
-                                streamWriter.Write(rtb_content);
-                                streamWriter.Close();
-                                streamWriter.Dispose();
-                            }
-                            catch (Exception ex)
-                            {
-                                //Throw any errors
-                                throw ex;
-                            }
-                            finally
-                            {
-                                if (saveLock) saveMutex.ReleaseMutex();
-                            }
-                        });
-
-                        task.ContinueWith(t =>
-                        {
-                            //Remove saved status (*)
-                            if (tab_text.Contains("*"))
-                            {
-                                tab.Text = tab.Text.Remove(0, 1);
-                            }
-                        }, TaskScheduler.FromCurrentSynchronizationContext());
-
-                        //Start the task
-                        task.Start();
-
-                        //Catch any errors and display (This occurs only when an error is thrown from the task)
-                        task.ContinueWith(t =>
-                        {
-
-                            task.Exception.Handle(ex =>
-                            {
-                                MessageBox.Show(ex.Message, "Error", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                                return false;
+                                bool saveLock = saveMutex.WaitOne();
+                                try
+                                {
+                                    File.WriteAllText(filepath, "");
+                                    StreamWriter streamWriter = File.AppendText(filepath);
+                                    streamWriter.Write(rtb_content);
+                                    streamWriter.Close();
+                                    streamWriter.Dispose();
+                                }
+                                catch (Exception ex)
+                                {
+                                    //Throw any errors
+                                    throw ex;
+                                }
+                                finally
+                                {
+                                    if (saveLock) saveMutex.ReleaseMutex();
+                                }
                             });
 
-                        }, CancellationToken.None, TaskContinuationOptions.OnlyOnFaulted, TaskScheduler.FromCurrentSynchronizationContext());
-                    }
+                            task.ContinueWith(t =>
+                            {
+                                //Remove saved status (*)
+                                if (tab_text.Contains("*"))
+                                {
+                                    tab.Text = tab.Text.Remove(0, 1);
+                                }
+                            }, TaskScheduler.FromCurrentSynchronizationContext());
 
+                            //Start the task
+                            task.Start();
+
+                            //Catch any errors and display (This occurs only when an error is thrown from the task)
+                            task.ContinueWith(t =>
+                            {
+
+                                task.Exception.Handle(ex =>
+                                {
+                                    MessageBox.Show(ex.Message, "Error", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                                    return false;
+                                });
+
+                            }, CancellationToken.None, TaskContinuationOptions.OnlyOnFaulted, TaskScheduler.FromCurrentSynchronizationContext());
+                        }
+                    }
                 }
             }
         }
@@ -418,7 +450,11 @@ namespace Textual
         {
             try
             {
+                //Only allow users to open rich text format or encrypted documents of textual
                 openFileDialog.Filter = "Textual Files|*.rtf;*texx";
+                openFileDialog.Multiselect = false;
+                openFileDialog.FileName = "";
+
                 if (openFileDialog.ShowDialog() == DialogResult.OK)
                 {
                     string filename = openFileDialog.FileName;
@@ -426,6 +462,7 @@ namespace Textual
                     //If file is an encrypted file
                     if (filename.EndsWith(".texx"))
                     {
+                        //Open the DecryptForm window
                         DecryptForm decryptForm = new DecryptForm(this, filename);
                         decryptForm.Show();
                     }
@@ -440,6 +477,7 @@ namespace Textual
                         RichTextBox richTextBox = getRichTextBox();
                         TabPage tabPage = tabControl.SelectedTab;
 
+                        //Create a new task that reads the document and returns the content as a string
                         Task<string> task = new Task<string>(() =>
                         {
                             try
@@ -492,8 +530,10 @@ namespace Textual
             }
         }
 
+        //Method called by DecryptForm class after user inputs a password
         public void decryptAndOpen(string password, string filename)
         {
+            //Task used to read document and decrypt it
             Task<string> task = new Task<string>(() =>
             {
                 try
@@ -509,10 +549,12 @@ namespace Textual
                 }
             });
 
+            //After task ends
             task.ContinueWith(t =>
             {
                 string decrypted = t.Result;
 
+                //If successfully decrypted
                 if (decrypted.StartsWith("ENCRYPTED"))
                 {
                     //If no unedited untitled tab exists or if no tabs are open
@@ -533,6 +575,7 @@ namespace Textual
                     filename_toolStripLabel.Text = filename;
                 }
                 else
+                //If not decrypted successfully 
                 {
                     throw new CryptographicException();
                 }
@@ -542,10 +585,11 @@ namespace Textual
             //Catch any errors and display (This occurs only when an error is thrown from the task)
             task.ContinueWith(t =>
             {
-
+                
                 task.Exception.Handle(ex =>
                 {
-                    if(ex is CryptographicException)
+                    //CryptographicException is thrown if the password is incorrect
+                    if (ex is CryptographicException)
                     {
                         MessageBox.Show("Invalid Password!", "Error", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                     }
@@ -580,6 +624,19 @@ namespace Textual
         {
             e.Graphics.DrawString(getRichTextBox().Text, getRichTextBox().Font, Brushes.Black, 12, 10);
         }
+
+
+
+        //When "Print Preview" is clicked
+        private void printPreviewToolStripMenuItem_Click(object sender, EventArgs e)
+        {
+            if (tabControl.SelectedTab != null)
+            {
+                printPreviewDialog.Document = printDocument;
+                printPreviewDialog.ShowDialog();
+            }
+        }
+
 
         //When "Undo" button is clicked
         private void undoToolStripMenuItem_Click(object sender, EventArgs e)
@@ -668,13 +725,12 @@ namespace Textual
                     if (tabControl.SelectedTab != null)
                     {
                         toolStripStatusLabel1.Text = t.Result.wordCount + " Words";
-                        toolStripStatusLabel2.Text = t.Result.charachterCount + " Charachters";
+                        toolStripStatusLabel2.Text = t.Result.charachterCount + " Characters";
                         toolStripStatusLabel3.Text = t.Result.lineCount + " Lines";
                     }
 
                 }, TaskScheduler.FromCurrentSynchronizationContext());
             }
-
         }
 
         //When user switches to a new tab display new word count, charachter count and line count
@@ -749,15 +805,16 @@ namespace Textual
         {
             string text = getRichTextBox().Text;
 
+            //Task to get all words of the rich text box in selected tab
             Task<string[]> task = new Task<string[]>(() =>
             {
                 bool aLock = rtbMutex.WaitOne();
 
                 try
                 {
+                    //Create array of strings by splitting rtb content and return result
                     char[] delimiters = new char[] { ' ', '\r', '\n' };
                     string[] words = text.Split(delimiters, StringSplitOptions.RemoveEmptyEntries);
-
 
                     return words;
                 }
@@ -770,41 +827,54 @@ namespace Textual
 
             task.ContinueWith(t =>
             {
+                //Using the result obtainted from initial function perform spell check
                 string[] words = t.Result;
 
                 foreach (string a_word in words)
                 {
                     string word = a_word.ToLower();
 
+                    bool aLock = rtbMutex.WaitOne();
                     //word = (word.Contains('.')) ? word.Remove('.') : word;
 
+                    //Create a match string using the selected word to be checked
                     var matchString = Regex.Escape(word);
 
-                    if (!wordList.words.Contains(word))
+                    try
                     {
-                        foreach (Match match in Regex.Matches(getRichTextBox().Text, matchString))
+                        //Check if wordlist object contains the selected word if it doesn't spelling is incorrect and should be highlighted in red
+                        if (!wordList.words.Contains(word))
                         {
-                            getRichTextBox().Select(match.Index, word.Length);
-                            getRichTextBox().SelectionColor = Color.Red;
-                            getRichTextBox().Select(getRichTextBox().TextLength, 0);
-                            getRichTextBox().SelectionColor = getRichTextBox().ForeColor;
-                        };
+                            foreach (Match match in Regex.Matches(getRichTextBox().Text, matchString))
+                            {
+                                getRichTextBox().Select(match.Index, word.Length);
+                                getRichTextBox().SelectionColor = Color.Red;
+                                getRichTextBox().Select(getRichTextBox().TextLength, 0);
+                                getRichTextBox().SelectionColor = getRichTextBox().ForeColor;
+                            };
+                        }
+                        //If spelling is correct word color is set to black
+                        else
+                        {
+                            foreach (Match match in Regex.Matches(getRichTextBox().Text, matchString))
+                            {
+                                getRichTextBox().Select(match.Index, word.Length);
+                                getRichTextBox().SelectionColor = Color.Black;
+                                getRichTextBox().Select(getRichTextBox().TextLength, 0);
+                                getRichTextBox().SelectionColor = getRichTextBox().ForeColor;
+                            };
+                        }
                     }
-                    else
+                    finally
                     {
-                        foreach (Match match in Regex.Matches(getRichTextBox().Text, matchString))
-                        {
-                            getRichTextBox().Select(match.Index, word.Length);
-                            getRichTextBox().SelectionColor = Color.Black;
-                            getRichTextBox().Select(getRichTextBox().TextLength, 0);
-                            getRichTextBox().SelectionColor = getRichTextBox().ForeColor;
-                        };
+                        //Finally release the mutex
+                        if (aLock) rtbMutex.ReleaseMutex();
                     }
                 }
 
             }, TaskScheduler.FromCurrentSynchronizationContext());
 
-
+            //Carry out task only if spell check is enabled
             if (spellCheckEnabled)
             {
                 task.Start();
@@ -845,6 +915,22 @@ namespace Textual
             }
         }
 
+        //Change title and toolstrip label when encryted and saved
+        public void changeTitleLabel(string filename)
+        {
+            //Get tabpage
+            TabPage tabPage = tabControl.SelectedTab;
+
+            //Simplified filename
+            string fname = filename.Substring(filename.LastIndexOf("\\") + 1);
+
+            //Set tab title
+            tabPage.Text = fname;
+
+            //Set the filepath as the tool strip label
+            filename_toolStripLabel.Text = filename;
+        }
+
         //Used by EncryptForm class to change the saved state of a tab
         public void changeSavedState()
         {
@@ -860,16 +946,6 @@ namespace Textual
         private void selectAllToolStripMenuItem_Click(object sender, EventArgs e)
         {
             if (tabControl.SelectedTab != null) getRichTextBox().SelectAll();
-        }
-
-        //When "Print Preview" is clicked
-        private void printPreviewToolStripMenuItem_Click(object sender, EventArgs e)
-        {
-            if (tabControl.SelectedTab != null)
-            {
-                printPreviewDialog.Document = printDocument;
-                printPreviewDialog.ShowDialog();
-            }
         }
 
         //When "About" button is clicked
@@ -1079,14 +1155,19 @@ namespace Textual
             {
                 try
                 {
+                    //Only able to get image type files
                     openFileDialog.Filter = "Images |*.bmp;*.jpg;*.png;*.gif;*.ico";
                     openFileDialog.Multiselect = false;
                     openFileDialog.FileName = "";
                     DialogResult result = openFileDialog.ShowDialog();
+
                     if (result == DialogResult.OK)
                     {
+                        //Get the selected image
                         Image img = Image.FromFile(openFileDialog.FileName);
+                        //Add the image to the clipboard
                         Clipboard.SetImage(img);
+                        //Paste the image on the rich text box
                         getRichTextBox().Paste();
                         getRichTextBox().Focus();
                     }
@@ -1108,12 +1189,14 @@ namespace Textual
             addImage();
         }
 
-        private void enableAutoSaveToolStripMenuItem_Click(object sender, EventArgs e)
+        //When "Enable/Disable Spell check" button is clicked
+        private void enableSpellCheckToolStripMenuItemm_Click(object sender, EventArgs e)
         {
+            //If spell check is already enabled
             if (spellCheckEnabled)
             {
                 spellCheckEnabled = false;
-                enableAutoSaveToolStripMenuItem.Text = "Disable &Spell Check";
+                enableSpellCheckToolStripMenuItem.Text = "Enable &Spell Check";
             }
             else
             {
@@ -1123,7 +1206,7 @@ namespace Textual
                 {
                     case DialogResult.OK:
                         spellCheckEnabled = true;
-                        enableAutoSaveToolStripMenuItem.Text = "Disable &Spell Check";
+                        enableSpellCheckToolStripMenuItem.Text = "Disable &Spell Check";
                         break;
                     case DialogResult.Cancel:
                         break;

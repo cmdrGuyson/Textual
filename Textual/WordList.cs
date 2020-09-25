@@ -11,7 +11,7 @@ namespace Textual
     class WordList
     {
 
-        public string[] words;
+        public string[] words { get; set; }
 
         public WordList()
         {
@@ -21,11 +21,11 @@ namespace Textual
                 //Import list of words from .txt file (located at ../bin/Debug/allwords.txt) 
                 words = File.ReadAllText("allwords.txt").Split(new[] { ' ', '\n', '\r' }, StringSplitOptions.RemoveEmptyEntries);
 
-                //convert all words to lower case
-                for(int i=0; i<words.Length; i++)
-                {
-                    words[i] = words[i].ToLower();
-                }
+                //convert all words to lower case. Parallel for loop is used to decrease runtime by achieving data parallelism
+                Parallel.For(0, words.Length, i =>
+                 {
+                     words[i] = words[i].ToLower();
+                 });
 
             }
             catch(Exception e)
